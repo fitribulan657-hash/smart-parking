@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dashboard Smart Parkir — MQTT (broker.hivemq.com)</title>
+
+  <!-- MQTT.js (browser bundle) -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- Chart.js untuk grafik -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #0f1724;
+      --card: linear-gradient(135deg,#0b1220 0%, #10202f 100%);
+      --accent: #3dd6a0;
+      --accent-2: #6ad3ff;
+      --muted: #9aa8b2;
+      --glass: rgba(255,255,255,0.03);
+      --danger: #ff6b6b;
+      --card-radius: 14px;
+    }
+    *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#07111a 0%, #071421 100%);color:#e6f0f2}
+    .wrap{max-width:1100px;margin:28px auto;padding:22px;}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:16px;}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{
+      width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent-2));
+      display:flex;align-items:center;justify-content:center;font-weight:700;color:#012;box-shadow:0 6px 18px rgba(10,20,30,0.6);
+    }
+    h1{font-size:20px;margin:0}
+    p.lead{margin:0;color:var(--muted);font-size:13px}
+
+    .toprow{display:flex;gap:14px;margin-bottom:18px;flex-wrap:wrap;align-items:center;}
+    .card{
+      background:var(--card);padding:18px;border-radius:var(--card-radius);box-shadow:0 8px 30px rgba(2,8,16,0.6);
+      min-width:0;color:#eaf7f1;
+    }
+
+    .status-card{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;background:var(--glass);backdrop-filter: blur(6px);}
+    .dot{width:12px;height:12px;border-radius:50%;background:#444;box-shadow:0 2px 6px rgba(0,0,0,0.6)}
+    .dot.connected{background:var(--accent);box-shadow:0 6px 18px rgba(60,200,160,0.18)}
+    .status-text{font-size:13px;color:var(--muted)}
+
+    .cards {
+      display:grid;grid-template-columns: repeat(3,1fr);gap:14px;flex:1;
+    }
+    .card.big{padding:20px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start}
+    .metric{font-size:38px;font-weight:700;letter-spacing: -1px}
+    .label{font-size:12px;color:var(--muted);margin-bottom:6px}
+    .muted{color:var(--muted);font-size:13px}
+    .accent-pill{display:inline-block;padding:8px 12px;border-radius:999px;background:linear-gradient(90deg, rgba(61,214,160,0.12), rgba(106,211,255,0.12));font-weight:600;color:var(--accent);}
+    
+    .controls{display:flex;gap:10px;align-items:center}
+    .input,button,select{padding:8px 12px;border-radius:10px;border:0;background:#071a24;color:#dff6f0;outline:none}
+    .input{min-width:220px;background:rgba(255,255,255,0.03)}
+    .button-primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#012;border:0;font-weight:700;box-shadow:0 6px 20px rgba(60,200,160,0.12)}
+    .button-ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+
+    main{display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start}
+    .panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:18px;border-radius:12px}
+
+    /* Chart area */
+    .chart-wrap{height:300px;padding:12px}
+
+    /* Right column */
+    .right{display:flex;flex-direction:column;gap:12px}
+    .list{display:flex;flex-direction:column;gap:8px}
+    .list .item{display:flex;justify-content:space-between;padding:10px;border-radius:10px;background:rgba(255,255,255,0.01);font-size:14px}
+    footer{margin-top:22px;color:var(--muted);font-size:13px;text-align:center}
+
+    /* Responsive */
+    @media (max-width:900px){
+      main{grid-template-columns:1fr; }
+      .cards{grid-template-columns:repeat(2,1fr)}
+    }
+    @media (max-width:560px){
+      .cards{grid-template-columns:1fr}
+      .brand h1{font-size:16px}
+      .logo{width:46px;height:46px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo">SP</div>
+        <div>
+          <h1>Smart Parkir — Dashboard</h1>
+          <p class="lead">Data realtime dari <strong>parkiran/iot</strong> (broker.hivemq.com)</p>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center">
+        <div class="status-card card">
+          <div id="connDot" class="dot"></div>
+          <div style="min-width:160px">
+            <div id="connLabel" class="status-text">Disconnected</div>
+            <div id="lastSeen" class="muted">—</div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:10px 14px;">
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="brokerSelect" class="input" style="width:230px">
+              <option value="wss://broker.hivemq.com:8000/mqtt">broker.hivemq.com (wss:8000)</option>
+              <option value="ws://broker.hivemq.com:8000/mqtt">broker.hivemq.com (ws:8000)</option>
+              <option value="wss://test.mosquitto.org:8081/mqtt">test.mosquitto.org (wss:8081)</option>
+            </select>
+            <button id="btnConnect" class="button-primary">Connect</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="toprow">
+      <div class="cards" style="flex:1">
+        <div class="card big panel">
+          <div class="label">TOTAL SLOT</div>
+          <div id="totalMetric" class="metric">6</div>
+          <div class="muted">Jumlah slot parkir tersedia</div>
+        </div>
+
+        <div class="card panel">
+          <div class="label">TERISI</div>
+          <div id="usedMetric" class="metric" style="color:var(--accent)"><span>0</span></div>
+          <div class="muted">Jumlah mobil saat ini</div>
+        </div>
+
+        <div class="card panel">
+          <div class="label">SISA</div>
+          <div id="availMetric" class="metric" style="color:var(--accent-2)"><span>6</span></div>
+          <div class="muted">Slot kosong tersedia</div>
+        </div>
+      </div>
+
+      <div style="min-width:280px">
+        <div class="card panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-weight:700">Kontrol MQTT</div>
+            <div class="muted" style="font-size:12px">Topik: <code>parkiran/iot</code></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input id="payloadInput" class="input" placeholder='{"totalSlots":6,"usedSlots":1,"availableSlots":5}'/>
+            <button id="btnPublish" class="button-primary">Publish</button>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button id="btnClearHistory" class="button-ghost">Clear History</button>
+            <div style="flex:1"></div>
+            <div class="muted" id="recvCount">Messages: 0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <main>
+      <section class="panel card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-weight:800">Grafik (history singkat)</div>
+          <div class="muted">Update realtime</div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="parkChart"></canvas>
+        </div>
+      </section>
+
+      <aside class="right">
+        <div class="panel card">
+          <div style="font-weight:700;margin-bottom:6px">Log & Info</div>
+          <div id="logArea" style="height:220px;overflow:auto;padding:6px;border-radius:8px;background:rgba(0,0,0,0.12);font-size:13px;color:var(--muted)"></div>
+        </div>
+
+        <div class="panel card list">
+          <div style="font-weight:700">Quick info</div>
+          <div class="item"><div>Total slot</div><div id="quickTotal">6</div></div>
+          <div class="item"><div>Terakhir update</div><div id="quickLast">—</div></div>
+          <div class="item"><div>Koneksi</div><div id="quickConn">Disconnected</div></div>
+        </div>
+      </aside>
+    </main>
+
+    <footer>
+      Dashboard dibuat untuk menampilkan payload JSON dari topic <code>parkiran/iot</code> — broker: <strong>broker.hivemq.com</strong>
+    </footer>
+  </div>
+
+<script>
+/*
+  Dashboard MQTT single-file
+  - Default topic: parkiran/iot
+  - Default broker: broker.hivemq.com (tries WSS then WS)
+  Notes:
+  - Jika membuka file lewat file:// dan browser memblok wss, jalankan lewat simple http server:
+      python -m http.server 8000
+    lalu buka http://localhost:8000/dashboard_parkiran.html
+*/
+
+const topic = 'parkiran/iot';
+
+// UI elements
+const connDot = document.getElementById('connDot');
+const connLabel = document.getElementById('connLabel');
+const lastSeen = document.getElementById('lastSeen');
+const totalMetric = document.getElementById('totalMetric');
+const usedMetric = document.getElementById('usedMetric');
+const availMetric = document.getElementById('availMetric');
+const logArea = document.getElementById('logArea');
+const recvCount = document.getElementById('recvCount');
+const quickTotal = document.getElementById('quickTotal');
+const quickLast = document.getElementById('quickLast');
+const quickConn = document.getElementById('quickConn');
+
+const payloadInput = document.getElementById('payloadInput');
+const btnPublish = document.getElementById('btnPublish');
+const btnConnect = document.getElementById('btnConnect');
+const brokerSelect = document.getElementById('brokerSelect');
+const btnClearHistory = document.getElementById('btnClearHistory');
+
+let client = null;
+let messagesReceived = 0;
+let lastPayloadTime = null;
+
+// chart setup
+const ctx = document.getElementById('parkChart').getContext('2d');
+const maxHistory = 30;
+let historyT = [], historyUsed = [], historyAvail = [];
+
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: historyT,
+    datasets: [
+      { label: 'Terisi', data: historyUsed, tension: 0.3, borderWidth: 2, pointRadius: 2, fill: true, backgroundColor: 'rgba(61,214,160,0.06)', borderColor: 'rgba(61,214,160,0.95)' },
+      { label: 'Sisa', data: historyAvail, tension: 0.3, borderWidth: 2, pointRadius: 2, fill: true, backgroundColor: 'rgba(106,211,255,0.06)', borderColor: 'rgba(106,211,255,0.95)' }
+    ]
+  },
+  options: {
+    plugins: { legend: { labels: { color: '#cfeef0' } } },
+    scales: {
+      x: { ticks: { color: '#9fbfc4' } },
+      y: { ticks: { color: '#9fbfc4' }, beginAtZero: true }
+    },
+    responsive: true,
+    maintainAspectRatio: false
+  }
+});
+
+// util
+function log(msg){
+  const t = new Date().toLocaleTimeString();
+  logArea.innerHTML = `<div style="margin-bottom:6px"><small style="color:var(--muted)">${t}</small> — ${msg}</div>` + logArea.innerHTML;
+}
+function setConnected(yes){
+  if(yes){
+    connDot.classList.add('connected');
+    connLabel.textContent = 'Connected';
+    quickConn.textContent = 'Connected';
+  } else {
+    connDot.classList.remove('connected');
+    connLabel.textContent = 'Disconnected';
+    quickConn.textContent = 'Disconnected';
+  }
+}
+
+// try connect (url chosen from select)
+function startConnect(url){
+  if(client && client.connected) {
+    client.end(true);
+    client = null;
+  }
+
+  log(`Mencoba konek ke ${url}`);
+  const clientId = 'web_' + Math.random().toString(16).substr(2,8);
+  try {
+    client = mqtt.connect(url, {
+      clientId,
+      keepalive: 30,
+      reconnectPeriod: 5000,
+      connectTimeout: 4000
+    });
+  } catch(e){
+    log('Error saat inisiasi MQTT client: ' + e.message);
+    return;
+  }
+
+  setConnected(false);
+
+  client.on('connect', () => {
+    log('MQTT connected, subscribe ke ' + topic);
+    setConnected(true);
+    messagesReceived = 0;
+    recvCount.textContent = 'Messages: 0';
+    client.subscribe(topic, {qos:0}, (err) => {
+      if(err) log('Gagal subscribe: ' + err.message);
+    });
+    lastSeen.textContent = new Date().toLocaleString();
+  });
+
+  client.on('reconnect', () => {
+    log('MQTT reconnecting...');
+    setConnected(false);
+  });
+  client.on('close', () => {
+    log('MQTT connection closed');
+    setConnected(false);
+  });
+  client.on('error', (err) => {
+    log('MQTT error: ' + (err && err.message ? err.message : err));
+  });
+
+  client.on('message', (tpc, payload) => {
+    messagesReceived++;
+    recvCount.textContent = 'Messages: ' + messagesReceived;
+    lastPayloadTime = new Date();
+    lastSeen.textContent = lastPayloadTime.toLocaleString();
+
+    let text = payload.toString();
+    log(`<strong>Topic:</strong> ${tpc} <br> <small style="color:var(--muted)">${text}</small>`);
+
+    // Try parse JSON
+    try {
+      const obj = JSON.parse(text);
+      handlePayload(obj);
+    } catch(e){
+      log('Payload bukan JSON valid: ' + text);
+    }
+  });
+}
+
+// update UI from object { totalSlots, usedSlots, availableSlots }
+function handlePayload(obj){
+  if(typeof obj.totalSlots !== 'undefined') totalMetric.textContent = obj.totalSlots;
+  if(typeof obj.usedSlots !== 'undefined') usedMetric.textContent = obj.usedSlots;
+  if(typeof obj.availableSlots !== 'undefined') availMetric.textContent = obj.availableSlots;
+
+  // quick info
+  quickTotal.textContent = obj.totalSlots ?? quickTotal.textContent;
+  quickLast.textContent = new Date().toLocaleTimeString();
+
+  // history
+  const tlabel = new Date().toLocaleTimeString();
+  historyT.push(tlabel);
+  historyUsed.push(Number(obj.usedSlots ?? 0));
+  historyAvail.push(Number(obj.availableSlots ?? 0));
+  if(historyT.length > maxHistory){ historyT.shift(); historyUsed.shift(); historyAvail.shift(); }
+  chart.update();
+}
+
+// initial connect (default select value)
+startConnect(brokerSelect.value);
+
+// UI events
+btnConnect.addEventListener('click', () => {
+  startConnect(brokerSelect.value);
+});
+btnPublish.addEventListener('click', () => {
+  const payload = payloadInput.value.trim();
+  if(!client || !client.connected){
+    alert('MQTT belum terhubung. Klik Connect dulu.');
+    return;
+  }
+  if(!payload){
+    alert('Isi payload JSON terlebih dahulu (contoh: {"totalSlots":6,"usedSlots":1,"availableSlots":5})');
+    return;
+  }
+  try {
+    // validate JSON
+    JSON.parse(payload);
+    client.publish(topic, payload);
+    log('Publish → ' + payload);
+  } catch(e){
+    alert('Payload harus JSON valid. Error: ' + e.message);
+  }
+});
+btnClearHistory.addEventListener('click', () => {
+  historyT.length = historyUsed.length = historyAvail.length = 0;
+  chart.update();
+  log('History cleared');
+});
+
+// allow user to change broker and reconnect via pressing select change
+brokerSelect.addEventListener('change', () => {
+  startConnect(brokerSelect.value);
+});
+
+// helpful tip: try fallback to ws if wss fails (handled by user selecting alternate entry)
+
+log('Dashboard siap — periksa koneksi broker dan klik Connect jika perlu.');
+</script>
+</body>
+</html>
